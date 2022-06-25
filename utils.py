@@ -175,9 +175,9 @@ def convert_sdf_samples_to_ply(
 
     This function adapted from: https://github.com/RobotLocomotion/spartan
     """
-
+    bbox=bbox.numpy()
     numpy_3d_sdf_tensor = pytorch_3d_sdf_tensor.numpy()
-    voxel_size = list((bbox[1]-bbox[0]).numpy() / np.array(pytorch_3d_sdf_tensor.shape))
+    voxel_size = list((bbox[1]-bbox[0]) / np.array(pytorch_3d_sdf_tensor.shape))
 
     verts, faces, normals, values = skimage.measure.marching_cubes(
         numpy_3d_sdf_tensor, level=level, spacing=voxel_size

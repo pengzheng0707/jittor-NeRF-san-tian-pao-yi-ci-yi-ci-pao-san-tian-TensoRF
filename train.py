@@ -47,7 +47,7 @@ def export_mesh(args):
 
     tensorf = eval(args.model_name)(**kwargs)
     tensorf.load(ckpt)
-
+    tensorf.gridSize=jt.tolist(tensorf.gridSize)
     alpha,_ = tensorf.getDenseAlpha()
     convert_sdf_samples_to_ply(alpha, f'{args.ckpt[:-3]}.ply',bbox=tensorf.aabb, level=0.005)
 

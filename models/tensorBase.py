@@ -249,6 +249,7 @@ class TensorBase(nn.Module):
             ckpt.update({'alphaMask.aabb': self.alphaMask.aabb})
         jt.save(ckpt, path)
 
+
     def load(self, ckpt):
         if 'alphaMask.aabb' in ckpt.keys():
             length = np.prod(ckpt['alphaMask.shape'])
@@ -258,7 +259,19 @@ class TensorBase(nn.Module):
             self.alphaMask.aabbSize=jt.array(self.alphaMask.aabbSize)
             self.alphaMask.invgridSize=jt.array(self.alphaMask.invgridSize) #TODO:
         self.load_state_dict(ckpt['state_dict'])
-
+        para=[]
+        for a in ['density_','app_']:
+            for b in ['line.','plane.']:
+                for c in ['0','1','2']:
+                    para.append(a+b+c)
+        for i in range(3):
+            self.density_line[i]=ckpt['state_dict'][para[i]]
+        for i in range(3):
+            self.density_plane[i]=ckpt['state_dict'][para[i+3]]
+        for i in range(3):
+            self.app_line[i]=ckpt['state_dict'][para[i+6]]
+        for i in range(3):
+            self.app_plane[i]=ckpt['state_dict'][para[i+9]]
 
     def sample_ray_ndc(self, rays_o, rays_d, is_train=True, N_samples=-1):
         N_samples = N_samples if N_samples > 0 else self.nSamples
@@ -312,6 +325,8 @@ class TensorBase(nn.Module):
         alpha = jt.zeros_like(dense_xyz[...,0])
         for i in range(gridSize[0]):
             alpha[i] = self.compute_alpha(dense_xyz[i].view(-1,3), self.stepSize).view((int(gridSize[1]), int(gridSize[2])))
+        t=alpha.max(-1)
+        t2=t.max(-1)
         return alpha, dense_xyz
 
     @jt.no_grad()
