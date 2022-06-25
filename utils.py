@@ -1,6 +1,7 @@
 import cv2
 import jittor as jt
 import numpy as np
+import jittor.transform as T
 from PIL import Image
 
 
@@ -28,7 +29,7 @@ def visualize_depth_numpy(depth, minmax=None, cmap=cv2.COLORMAP_JET):
 
 def init_log(log, keys):
     for key in keys:
-        log[key] = jt.array([0.0], dtype=float)
+        log[key] = jt.array([0.0])
     return log
 
 def visualize_depth(depth, minmax=None, cmap=cv2.COLORMAP_JET):
@@ -48,13 +49,13 @@ def visualize_depth(depth, minmax=None, cmap=cv2.COLORMAP_JET):
     x = (x-mi)/(ma-mi+1e-8) # normalize to 0~1
     x = (255*x).astype(np.uint8)
     x_ = Image.fromarray(cv2.applyColorMap(x, cmap))
-    x_ = jt.array(jt.transpose(jt.array(np.array(x_)), [2,0,1]), dtype=jt.float32)/255.  # (3, H, W)
+    x_ = T.ToTensor()(x_)  # (3, H, W)
     return x_, [mi,ma]
 
 def N_to_reso(n_voxels, bbox):
     xyz_min, xyz_max = bbox
     voxel_size = ((xyz_max - xyz_min).prod() / n_voxels).pow(1 / 3)
-    return ((xyz_max - xyz_min) / voxel_size).long().tolist()
+    return ((xyz_max - xyz_min) / voxel_size).int64().tolist()
 
 def cal_n_samples(reso, step_ratio=0.5):
     return int(np.linalg.norm(reso)/step_ratio)
@@ -72,8 +73,8 @@ def init_lpips(net_name):
 def rgb_lpips(np_gt, np_im, net_name):
     if net_name not in __LPIPS__:
         __LPIPS__[net_name] = init_lpips(net_name)
-    gt = jt.array(np_gt).permute([2, 0, 1])
-    im = jt.array(np_im).permute([2, 0, 1])
+    gt = jt.float64(np_gt).permute([2, 0, 1])
+    im = jt.float64(np_im).permute([2, 0, 1])
     return __LPIPS__[net_name](gt, im, normalize=True).item()
 
 
@@ -176,7 +177,7 @@ def convert_sdf_samples_to_ply(
     """
 
     numpy_3d_sdf_tensor = pytorch_3d_sdf_tensor.numpy()
-    voxel_size = list((bbox[1]-bbox[0]) / np.array(pytorch_3d_sdf_tensor.shape))
+    voxel_size = list((bbox[1]-bbox[0]).numpy() / np.array(pytorch_3d_sdf_tensor.shape))
 
     verts, faces, normals, values = skimage.measure.marching_cubes(
         numpy_3d_sdf_tensor, level=level, spacing=voxel_size

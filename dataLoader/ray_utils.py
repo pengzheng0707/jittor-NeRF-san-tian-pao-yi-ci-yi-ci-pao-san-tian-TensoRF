@@ -36,13 +36,20 @@ def get_ray_directions(H, W, focal, center=None):
 
     i, j = grid.unbind(-1)
     #TODO:直接用jittor计算
-    i=jt.array(i.numpy())
-    j=jt.array(j.numpy())
+    # i=jt.array(i.numpy())
+    # j=jt.array(j.numpy())
+    # # the direction here is without +0.5 pixel centering as calibration is not so accurate
+    # # see https://github.com/bmild/nerf/issues/24
+    # cent = center if center is not None else [W / 2, H / 2]
+    # directions = jt.stack([(i - cent[0]) / focal[0], (j - cent[1]) / focal[1], jt.ones_like(i)], -1)  # (H, W, 3)
+
+    i=i.numpy()
+    j=j.numpy()
     # the direction here is without +0.5 pixel centering as calibration is not so accurate
     # see https://github.com/bmild/nerf/issues/24
     cent = center if center is not None else [W / 2, H / 2]
-    directions = jt.stack([(i - cent[0]) / focal[0], (j - cent[1]) / focal[1], jt.ones_like(i)], -1)  # (H, W, 3)
-
+    directions = np.stack([(i - cent[0]) / focal[0], (j - cent[1]) / focal[1], np.ones_like(i)], -1)  # (H, W, 3)
+    directions=jt.array(directions)
     return directions
 
 
@@ -156,7 +163,7 @@ def sample_pdf(bins, weights, N_samples, det=False, pytest=False):
             u = np.broadcast_to(u, new_shape)
         else:
             u = np.random.rand(*new_shape)
-        u = jt.array(u)
+        u = jt.float64(u)
 
     # Invert CDF
 

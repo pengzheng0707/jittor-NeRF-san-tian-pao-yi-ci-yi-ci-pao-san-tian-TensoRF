@@ -32,7 +32,7 @@ class SimpleSampler:
     def nextids(self):
         self.curr+=self.batch
         if self.curr + self.batch > self.total:
-            self.ids = jt.array(np.random.permutation(self.total),dtype=jt.int64)
+            self.ids = jt.int64(np.random.permutation(self.total))
             self.curr = 0
         return self.ids[self.curr:self.curr+self.batch]
 
@@ -41,6 +41,8 @@ class SimpleSampler:
 def export_mesh(args):
 
     ckpt = jt.load(args.ckpt)
+    for k in ckpt['state_dict'].keys():
+        ckpt['state_dict'][k]=jt.array(ckpt['state_dict'][k])
     kwargs = ckpt['kwargs']
 
     tensorf = eval(args.model_name)(**kwargs)
@@ -152,7 +154,7 @@ def reconstruction(args):
 
 
     #linear in logrithmic space
-    N_voxel_list = (jt.round(jt.exp(jt.linspace(np.log(args.N_voxel_init), np.log(args.N_voxel_final), len(upsamp_list)+1))).long()).tolist()[1:]
+    N_voxel_list = (jt.round(jt.exp(jt.linspace(np.log(args.N_voxel_init), np.log(args.N_voxel_final), len(upsamp_list)+1))).int64()).tolist()[1:]
 
 
     jt.clean_graph()
@@ -180,6 +182,7 @@ def reconstruction(args):
 
 
         ray_idx = trainingSampler.nextids()
+
         rays_train, rgb_train = allrays[ray_idx], allrgbs[ray_idx]
 
         #rgb_map, alphas_map, depth_map, weights, uncertainty
@@ -211,7 +214,7 @@ def reconstruction(args):
             total_loss = total_loss + loss_tv
             summary_writer.add_scalar('train/reg_tv_app', loss_tv.detach().item(), global_step=iteration)
 
-        
+      
         optimizer.step(total_loss)
 
         loss = loss.detach().item()
@@ -318,7 +321,6 @@ def reconstruction(args):
 
 if __name__ == '__main__':
 
-    #TODO：torch.set_default_dtype(torch.float32)
     jt.set_seed(20211202)
     np.random.seed(20211202)
 

@@ -1,6 +1,6 @@
 
 dataset_name = blender
-datadir = ./../JNeRF/data/Coffee
+datadir = ./data/Coffee
 expname =  coffee3
 basedir = ./log
 
@@ -12,8 +12,8 @@ N_voxel_final = 27000000 # 300**3
 upsamp_list = [2000,3000,4000,5500,7000]
 update_AlphaMask_list = [2000,4000]
 
-scene_box=[-0.1, -0.02, -0.08, 0.11, 0.37, 0.08]
-near_far=[0.5, 1.5]
+scene_box=[-0.2, -0.1, -0.2, 0.2, 0.8, 0.2]
+near_far=[0.2, 2.0]
 
 N_vis = 5
 vis_every = 10000

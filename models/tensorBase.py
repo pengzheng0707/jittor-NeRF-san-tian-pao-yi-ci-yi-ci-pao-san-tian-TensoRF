@@ -45,10 +45,10 @@ class AlphaGridMask(nn.Module):
         self.aabbSize = self.aabb[1] - self.aabb[0]
         self.invgridSize = 1.0/self.aabbSize * 2
         self.alpha_volume = alpha_volume.view(1,1,*alpha_volume.shape[-3:])
-        self.gridSize = jt.array([alpha_volume.shape[-1],alpha_volume.shape[-2],alpha_volume.shape[-3]],dtype=jt.int64)
+        self.gridSize = jt.int64([alpha_volume.shape[-1],alpha_volume.shape[-2],alpha_volume.shape[-3]])
 
     def sample_alpha(self, xyz_sampled):
-        xyz_sampled = self.normalize_coord(xyz_sampled).view(1,-1,1,1,3)
+        xyz_sampled = self.normalize_coord(xyz_sampled).view(1,-1,1,1,3)    #TODO:
         if xyz_sampled.shape[1] == 0:
             return jt.zeros([0])
         else:
@@ -66,11 +66,8 @@ class MLPRender_Fea(nn.Module):
         self.in_mlpC = 2*viewpe*3 + 2*feape*inChanel + 3 + inChanel
         self.viewpe = viewpe
         self.feape = feape
-        layer1 = nn.Linear(self.in_mlpC, featureC)
-        layer2 = nn.Linear(featureC, featureC)
-        layer3 = nn.Linear(featureC,3)
 
-        self.mlp = nn.Sequential(layer1, nn.ReLU(), layer2, nn.ReLU(), layer3)
+        self.mlp = nn.Sequential(nn.Linear(self.in_mlpC, featureC), nn.ReLU(), nn.Linear(featureC, featureC), nn.ReLU(), nn.Linear(featureC,3))
         nn.init.constant_(self.mlp[-1].bias, 0)
 
     def execute(self, pts, viewdirs, features):
@@ -92,11 +89,8 @@ class MLPRender_PE(nn.Module):
         self.in_mlpC = (3+2*viewpe*3)+ (3+2*pospe*3)  + inChanel #
         self.viewpe = viewpe
         self.pospe = pospe
-        layer1 = nn.Linear(self.in_mlpC, featureC)
-        layer2 = nn.Linear(featureC, featureC)
-        layer3 = nn.Linear(featureC,3)
 
-        self.mlp = nn.Sequential(layer1, nn.ReLU(), layer2, nn.ReLU(), layer3)
+        self.mlp = nn.Sequential(nn.Linear(self.in_mlpC, featureC), nn.ReLU(), nn.Linear(featureC, featureC), nn.ReLU(), nn.Linear(featureC,3))
         nn.init.constant_(self.mlp[-1].bias, 0)
 
     def execute(self, pts, viewdirs, features):
@@ -117,12 +111,8 @@ class MLPRender(nn.Module):
 
         self.in_mlpC = (3+2*viewpe*3) + inChanel
         self.viewpe = viewpe
-        
-        layer1 = nn.Linear(self.in_mlpC, featureC)
-        layer2 = nn.Linear(featureC, featureC)
-        layer3 = nn.Linear(featureC,3)
 
-        self.mlp = nn.Sequential(layer1, nn.ReLU(), layer2, nn.ReLU(), layer3)
+        self.mlp = nn.Sequential(nn.Linear(self.in_mlpC, featureC), nn.ReLU(), nn.Linear(featureC, featureC), nn.ReLU(), layer3 = nn.Linear(featureC,3))
         nn.init.constant_(self.mlp[-1].bias, 0)
 
     def execute(self, pts, viewdirs, features):
@@ -192,16 +182,17 @@ class TensorBase(nn.Module):
         print("pos_pe", pos_pe, "view_pe", view_pe, "fea_pe", fea_pe)
         print(self.renderModule)
 
+    @jt.no_grad()   #TODO:
     def update_stepSize(self, gridSize):
+        self.aabb=jt.array(self.aabb)
         print("aabb", self.aabb.view(-1))
         print("grid size", gridSize)
         self.aabbSize = self.aabb[1] - self.aabb[0]
         self.invaabbSize = 2.0/self.aabbSize
-        gridSize=list((int(gridSize[0]),int(gridSize[1]),int(gridSize[2]))) #TODO:
-        self.gridSize= jt.array(gridSize,dtype=jt.int64)
-        self.units=self.aabbSize / (self.gridSize-1)
-        self.stepSize=jt.mean(self.units)*self.step_ratio
-        self.aabbDiag = jt.sqrt(jt.sum(jt.pow(self.aabbSize, 2)))
+        self.gridSize= jt.int64(gridSize)
+        self.units=(self.aabbSize / (self.gridSize-1)).float32()
+        self.stepSize=(jt.mean(self.units)*self.step_ratio)
+        self.aabbDiag = jt.sqrt(jt.sum(jt.sqr(self.aabbSize)))
         self.nSamples=int((self.aabbDiag / self.stepSize).item()) + 1
         print("sampling step size: ", self.stepSize)
         print("sampling number: ", self.nSamples)
@@ -261,8 +252,11 @@ class TensorBase(nn.Module):
     def load(self, ckpt):
         if 'alphaMask.aabb' in ckpt.keys():
             length = np.prod(ckpt['alphaMask.shape'])
-            alpha_volume = jt.array(np.unpackbits(ckpt['alphaMask.mask'])[:length].reshape(ckpt['alphaMask.shape']))
+            alpha_volume = jt.float64(np.unpackbits(ckpt['alphaMask.mask'])[:length].reshape(ckpt['alphaMask.shape']))
             self.alphaMask = AlphaGridMask( ckpt['alphaMask.aabb'], alpha_volume.float())
+            self.alphaMask.aabb=jt.array(self.alphaMask.aabb)
+            self.alphaMask.aabbSize=jt.array(self.alphaMask.aabbSize)
+            self.alphaMask.invgridSize=jt.array(self.alphaMask.invgridSize) #TODO:
         self.load_state_dict(ckpt['state_dict'])
 
 
@@ -284,7 +278,7 @@ class TensorBase(nn.Module):
         vec = jt.where(rays_d==0, jt.full_like(rays_d, 1e-6), rays_d)
         rate_a = (self.aabb[1] - rays_o) / vec
         rate_b = (self.aabb[0] - rays_o) / vec
-        t_min = jt.minimum(rate_a, rate_b).arg_reduce('max',dim=-1,keepdims=False)[1].clamp(near, far)
+        t_min = jt.minimum(rate_a, rate_b).max(-1).clamp(near, far)
 
         rng = jt.arange(N_samples)[None].float()
         if is_train:
@@ -317,7 +311,7 @@ class TensorBase(nn.Module):
         # print(self.stepSize, self.distance_scale*self.aabbDiag)
         alpha = jt.zeros_like(dense_xyz[...,0])
         for i in range(gridSize[0]):
-            alpha[i] = self.compute_alpha(dense_xyz[i].view(-1,3), self.stepSize).view((gridSize[1], gridSize[2]))
+            alpha[i] = self.compute_alpha(dense_xyz[i].view(-1,3), self.stepSize).view((int(gridSize[1]), int(gridSize[2])))
         return alpha, dense_xyz
 
     @jt.no_grad()
@@ -333,12 +327,12 @@ class TensorBase(nn.Module):
         alpha[alpha>=self.alphaMask_thres] = 1
         alpha[alpha<self.alphaMask_thres] = 0
 
-        self.alphaMask = AlphaGridMask( self.aabb, alpha)
+        self.alphaMask = AlphaGridMask(self.aabb, alpha)
 
         valid_xyz = dense_xyz[alpha>0.5]
 
-        xyz_min = valid_xyz.arg_reduce('min',dim=0,keepdims=False)[1]
-        xyz_max = valid_xyz.arg_reduce('max',dim=0,keepdims=False)[1]
+        xyz_min = valid_xyz.min(0)
+        xyz_max = valid_xyz.max(0)
 
         new_aabb = jt.stack((xyz_min, xyz_max))
 
@@ -350,15 +344,14 @@ class TensorBase(nn.Module):
     def filtering_rays(self, all_rays, all_rgbs, N_samples=256, chunk=10240*5, bbox_only=False):
         print('========> filtering rays ...')
         tt = time.time()
+        a=all_rays.shape[:-1]
+        b=list(a)
+        c=np.array(b)
+        d=c.prod()
+        N = jt.int64(d)
 
-        #TODO:第一个N是NanoVector，其没有prod函数
-        N=all_rays.shape[:-1]
-        N=list(N)
-        N=jt.array(N)
-        N=N.prod()
         mask_filtered = []
-
-        idx_chunks = jt.split(jt.arange(int(N)), chunk)
+        idx_chunks = jt.split(jt.arange(N.item()), chunk)
         for idx_chunk in idx_chunks:
             rays_chunk = all_rays[idx_chunk]
 
@@ -367,8 +360,8 @@ class TensorBase(nn.Module):
                 vec = jt.where(rays_d == 0, jt.full_like(rays_d, 1e-6), rays_d)
                 rate_a = (self.aabb[1] - rays_o) / vec
                 rate_b = (self.aabb[0] - rays_o) / vec
-                t_min=jt.arg_reduce(jt.minimum(rate_a, rate_b),'max', dim=-1, keepdims=False)[1]#.clamp(near, far)
-                t_max=jt.arg_reduce(jt.maximum(rate_a, rate_b),'min', dim=-1, keepdims=False)[1]#.clamp(near, far)
+                t_min = jt.minimum(rate_a, rate_b).max(-1)#.clamp(near, far)
+                t_max = jt.maximum(rate_a, rate_b).min(-1)#.clamp(near, far)
                 mask_inbbox = t_max > t_min
 
             else:
@@ -396,7 +389,7 @@ class TensorBase(nn.Module):
             alphas = self.alphaMask.sample_alpha(xyz_locs)
             alpha_mask = alphas > 0
         else:
-            alpha_mask = jt.array(jt.ones_like(xyz_locs[:,0]),dtype=bool)
+            alpha_mask = jt.ones_like(xyz_locs[:,0]).bool()
             
 
         sigma = jt.zeros(xyz_locs.shape[:-1])
@@ -444,6 +437,7 @@ class TensorBase(nn.Module):
             sigma_feature = self.compute_densityfeature(xyz_sampled[ray_valid])
 
             validsigma = self.feature2density(sigma_feature)
+            #TODO:sigma.start_grad()
             sigma[ray_valid] = validsigma
 
 

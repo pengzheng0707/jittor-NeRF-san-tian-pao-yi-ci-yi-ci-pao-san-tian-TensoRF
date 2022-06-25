@@ -7,7 +7,7 @@ from tqdm import tqdm
 import os
 from PIL import Image
 import numpy as np
-
+import jittor.transform as T
 
 from .ray_utils import *
 jt.flags.use_cuda = 1
@@ -20,7 +20,7 @@ class BlenderDataset(Dataset):
         self.split = split
         self.is_stack = is_stack
         self.img_wh = (int(800/downsample),int(800/downsample))
-
+        self.define_transforms()
 
         self.scene_bbox = jt.array(scene_box).reshape(2, 3)
         self.blender2opencv = np.array([[-1, 0, 0, 0], [0, -1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]])
@@ -51,7 +51,7 @@ class BlenderDataset(Dataset):
         # ray directions for all pixels, same for all images (same H, W, focal)
         self.directions = get_ray_directions(h, w, [self.focal,self.focal])  # (h, w, 3)
         self.directions = self.directions / jt.norm(self.directions, dim=-1, keepdim=True)
-        self.intrinsics = jt.array([[self.focal,0,w/2],[0,self.focal,h/2],[0,0,1]],dtype=jt.float32)
+        self.intrinsics = jt.float64([[self.focal,0,w/2],[0,self.focal,h/2],[0,0,1]]).float32()
 
         self.image_paths = []
         self.poses = []
@@ -67,7 +67,7 @@ class BlenderDataset(Dataset):
 
             frame = self.meta['frames'][i]
             pose = np.array(frame['transform_matrix']) @ self.blender2opencv
-            c2w = jt.array(pose,dtype=jt.float32)
+            c2w = jt.float32(pose)
             self.poses += [c2w]
 
             image_path = os.path.join(self.root_dir, f"{frame['file_path']}.png")
@@ -76,7 +76,7 @@ class BlenderDataset(Dataset):
             
             if self.downsample!=1.0:
                 img = img.resize(self.img_wh, Image.LANCZOS)
-            img = jt.array(jt.transpose(jt.array(np.array(img)), [2,0,1]), dtype=jt.float32)/255. # (4, h, w)
+            img = jt.float32(self.transform(img))  # (4, h, w)
             img = img.view(4, -1).permute(1, 0)  # (h*w, 4) RGBA
             img = img[:, :3] * img[:, -1:] + (1 - img[:, -1:])  # blend A to RGB
             self.all_rgbs += [img]
@@ -97,7 +97,8 @@ class BlenderDataset(Dataset):
             self.all_rgbs = jt.stack(self.all_rgbs, 0).reshape(-1,*self.img_wh[::-1], 3)  # (len(self.meta['frames]),h,w,3)
             # self.all_masks = jt.stack(self.all_masks, 0).reshape(-1,*self.img_wh[::-1])  # (len(self.meta['frames]),h,w,3)
 
-
+    def define_transforms(self):
+        self.transform = T.ToTensor()
 
         
     def define_proj_mat(self):

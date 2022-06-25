@@ -36,8 +36,7 @@ class TensorVM(TensorBase):
         plane_feats = nn.grid_sample(self.plane_coef[:, :self.app_n_comp], coordinate_plane, align_corners=True).view(3 * self.app_n_comp, -1)
         line_feats = nn.grid_sample(self.line_coef[:, :self.app_n_comp], coordinate_line, align_corners=True).view(3 * self.app_n_comp, -1)
         
-        t=(plane_feats * line_feats).transpose([2,1,0])
-        app_features = self.basis_mat((plane_feats * line_feats).transpose([2,1,0]))    #TODO:有没有2?
+        app_features = self.basis_mat((plane_feats * line_feats).transpose([1,0]))
         
         return sigma_feature, app_features
 
@@ -90,15 +89,15 @@ class TensorVM(TensorBase):
         return self.vectorDiffs(self.line_coef[:,-self.density_n_comp:]) + self.vectorDiffs(self.line_coef[:,:self.app_n_comp])
     
     
-    @jt.no_grad()
+    #TODO:@jt.no_grad()
     def up_sampling_VM(self, plane_coef, line_coef, res_target):
 
         for i in range(len(self.vecMode)):
             vec_id = self.vecMode[i]
             mat_id_0, mat_id_1 = self.matMode[i]
 
-            plane_coef[i] = nn.interpolate(plane_coef[i].data, size=(res_target[mat_id_1], res_target[mat_id_0]), mode='bilinear', align_corners=True)
-            line_coef[i] = nn.interpolate(line_coef[i].data, size=(res_target[vec_id], 1), mode='bilinear', align_corners=True)
+            plane_coef[i] = nn.interpolate(plane_coef[i].detach(), size=(res_target[mat_id_1], res_target[mat_id_0]), mode='bilinear', align_corners=True)
+            line_coef[i] = nn.interpolate(line_coef[i].detach(), size=(res_target[vec_id], 1), mode='bilinear', align_corners=True)
 
         # plane_coef[0] = nn.Parameter(
         #     nn.interpolate(plane_coef[0].data, size=(res_target[1], res_target[0]), mode='bilinear',
@@ -118,15 +117,17 @@ class TensorVM(TensorBase):
 
         return plane_coef, line_coef
 
-    @jt.no_grad()
+    #TODO:@jt.no_grad()
     def upsample_volume_grid(self, res_target):
         # self.app_plane, self.app_line = self.up_sampling_VM(self.app_plane, self.app_line, res_target)
         # self.density_plane, self.density_line = self.up_sampling_VM(self.density_plane, self.density_line, res_target)
 
-        scale = res_target[0]/self.line_coef.shape[2] #assuming xyz have the same scale
-        plane_coef = nn.interpolate(self.plane_coef.detach().data, scale_factor=scale, mode='bilinear',align_corners=True)
-        line_coef  = nn.interpolate(self.line_coef.detach().data, size=(res_target[0],1), mode='bilinear',align_corners=True)
+        with jt.no_grad():
+            scale = res_target[0]/self.line_coef.shape[2] #assuming xyz have the same scale
+            plane_coef = nn.interpolate(self.plane_coef.detach(), scale_factor=scale, mode='bilinear',align_corners=True)
+            line_coef  = nn.interpolate(self.line_coef.detach(), size=(res_target[0],1), mode='bilinear',align_corners=True)
         self.plane_coef, self.line_coef = plane_coef, line_coef
+
         self.compute_stepSize(res_target)
         print(f'upsamping to {res_target}')
 
@@ -234,19 +235,20 @@ class TensorVMSplit(TensorBase):
 
 
 
-    @jt.no_grad()
+    #TODO:@jt.no_grad()
     def up_sampling_VM(self, plane_coef, line_coef, res_target):
 
         for i in range(len(self.vecMode)):
+
             vec_id = self.vecMode[i]
             mat_id_0, mat_id_1 = self.matMode[i]
-            plane_coef[i] = nn.interpolate(jt.array(plane_coef[i].data), size=(res_target[mat_id_1], res_target[mat_id_0]), mode='bilinear', align_corners=True)
-            line_coef[i] = nn.interpolate(jt.array(line_coef[i].data), size=(res_target[vec_id], 1), mode='bilinear', align_corners=True)
+            plane_coef[i] = nn.interpolate(plane_coef[i].detach(), size=(res_target[mat_id_1], res_target[mat_id_0]), mode='bilinear', align_corners=True)  #TODO:
+            line_coef[i] = nn.interpolate(line_coef[i].detach(), size=(res_target[vec_id], 1), mode='bilinear', align_corners=True)
 
 
         return plane_coef, line_coef
 
-    @jt.no_grad()
+    #TODO:@jt.no_grad()
     def upsample_volume_grid(self, res_target):
         self.app_plane, self.app_line = self.up_sampling_VM(self.app_plane, self.app_line, res_target)
         self.density_plane, self.density_line = self.up_sampling_VM(self.density_plane, self.density_line, res_target)
@@ -254,37 +256,37 @@ class TensorVMSplit(TensorBase):
         self.update_stepSize(res_target)
         print(f'upsamping to {res_target}')
 
-    @jt.no_grad()
+    #TODO:
     def shrink(self, new_aabb):
-        print("====> shrinking ...")
-        xyz_min, xyz_max = new_aabb
-        t_l, b_r = (xyz_min - self.aabb[0]) / self.units, (xyz_max - self.aabb[0]) / self.units
-        # print(new_aabb, self.aabb)
-        # print(t_l, b_r,self.alphaMask.alpha_volume.shape)
-        t_l, b_r = jt.round(jt.round(t_l)).long(), jt.round(b_r).long() + 1
-        b_r = jt.stack([b_r, self.gridSize]).arg_reduce('min',dim=0,keepdims=False)[1]
+        with jt.no_grad():
+            print("====> shrinking ...")
+            xyz_min, xyz_max = new_aabb
+            t_l, b_r = (xyz_min - self.aabb[0]) / self.units, (xyz_max - self.aabb[0]) / self.units
+            # print(new_aabb, self.aabb)
+            # print(t_l, b_r,self.alphaMask.alpha_volume.shape)
+            t_l, b_r = jt.round(jt.round(t_l)).int64(), jt.round(b_r).int64() + 1
+            b_r = jt.stack([b_r, self.gridSize]).min(0)
 
         for i in range(len(self.vecMode)):
             mode0 = self.vecMode[i]
-            self.density_line[i] = jt.array(self.density_line[i].data[...,int(t_l[mode0]):int(b_r[mode0]),:])
-            self.app_line[i] = jt.array(self.app_line[i].data[...,int(t_l[mode0]):int(b_r[mode0]),:]
-            )
+            self.density_line[i] = self.density_line[i].detach()[...,t_l[mode0].item():b_r[mode0].item(),:]
+            self.app_line[i] = self.app_line[i].detach()[...,t_l[mode0].item():b_r[mode0].item(),:]
             mode0, mode1 = self.matMode[i]
-            self.density_plane[i] = jt.array(self.density_plane[i].data[...,int(t_l[mode1]):int(b_r[mode1]),int(t_l[mode0]):int(b_r[mode0])])
-            self.app_plane[i] = jt.array(self.app_plane[i].data[...,int(t_l[mode1]):int(b_r[mode1]),int(t_l[mode0]):int(b_r[mode0])])
+            self.density_plane[i] = self.density_plane[i].detach()[...,t_l[mode1].item():b_r[mode1].item(),t_l[mode0].item():b_r[mode0].item()]
+            self.app_plane[i] = self.app_plane[i].detach()[...,t_l[mode1].item():b_r[mode1].item(),t_l[mode0].item():b_r[mode0].item()]
 
+        with jt.no_grad():
+            if not jt.all(self.alphaMask.gridSize == self.gridSize):
+                t_l_r, b_r_r = t_l / (self.gridSize-1), (b_r-1) / (self.gridSize-1)
+                correct_aabb = jt.zeros_like(new_aabb)
+                correct_aabb[0] = (1-t_l_r)*self.aabb[0] + t_l_r*self.aabb[1]
+                correct_aabb[1] = (1-b_r_r)*self.aabb[0] + b_r_r*self.aabb[1]
+                print("aabb", new_aabb, "\ncorrect aabb", correct_aabb)
+                new_aabb = correct_aabb
 
-        if not jt.all(self.alphaMask.gridSize == self.gridSize):
-            t_l_r, b_r_r = t_l / (self.gridSize-1), (b_r-1) / (self.gridSize-1)
-            correct_aabb = jt.zeros_like(new_aabb)
-            correct_aabb[0] = (1-t_l_r)*self.aabb[0] + t_l_r*self.aabb[1]
-            correct_aabb[1] = (1-b_r_r)*self.aabb[0] + b_r_r*self.aabb[1]
-            print("aabb", new_aabb, "\ncorrect aabb", correct_aabb)
-            new_aabb = correct_aabb
-
-        newSize = b_r - t_l
-        self.aabb = new_aabb
-        self.update_stepSize((newSize[0], newSize[1], newSize[2]))
+            newSize = b_r - t_l
+            self.aabb = new_aabb
+            self.update_stepSize(newSize)
 
 
 class TensorCP(TensorBase):
@@ -348,13 +350,13 @@ class TensorCP(TensorBase):
         return self.basis_mat(line_coef_point.transpose([1,0]))
     
 
-    @jt.no_grad()
+    #TODO:@jt.no_grad()
     def up_sampling_Vector(self, density_line_coef, app_line_coef, res_target):
 
         for i in range(len(self.vecMode)):
             vec_id = self.vecMode[i]
-            density_line_coef[i] = nn.interpolate(density_line_coef[i].data, size=(res_target[vec_id], 1), mode='bilinear', align_corners=True)
-            app_line_coef[i] = nn.interpolate(app_line_coef[i].data, size=(res_target[vec_id], 1), mode='bilinear', align_corners=True)
+            density_line_coef[i] = nn.interpolate(density_line_coef[i].detach(), size=(res_target[vec_id], 1), mode='bilinear', align_corners=True)
+            app_line_coef[i] = nn.interpolate(app_line_coef[i].detach(), size=(res_target[vec_id], 1), mode='bilinear', align_corners=True)
 
         return density_line_coef, app_line_coef
 
@@ -365,31 +367,33 @@ class TensorCP(TensorBase):
         self.update_stepSize(res_target)
         print(f'upsamping to {res_target}')
 
-    @jt.no_grad()
+    #TODO:@jt.no_grad()
     def shrink(self, new_aabb):
-        print("====> shrinking ...")
-        xyz_min, xyz_max = new_aabb
-        t_l, b_r = (xyz_min - self.aabb[0]) / self.units, (xyz_max - self.aabb[0]) / self.units
+        with jt.no_grad():
+            print("====> shrinking ...")
+            xyz_min, xyz_max = new_aabb
+            t_l, b_r = (xyz_min - self.aabb[0]) / self.units, (xyz_max - self.aabb[0]) / self.units
 
-        t_l, b_r = jt.round(jt.round(t_l)).long(), jt.round(b_r).long() + 1
-        b_r = jt.stack([b_r, self.gridSize]).arg_reduce('min',dim=0,keepdims=False)[1]
+            t_l, b_r = jt.round(jt.round(t_l)).int64(), jt.round(b_r).int64() + 1
+            b_r = jt.stack([b_r, self.gridSize]).min(0)
 
 
         for i in range(len(self.vecMode)):
             mode0 = self.vecMode[i]
-            self.density_line[i] = self.density_line[i].data[...,t_l[mode0]:b_r[mode0],:]
-            self.app_line[i] = self.app_line[i].data[...,t_l[mode0]:b_r[mode0],:]
-        if not jt.all(self.alphaMask.gridSize == self.gridSize):
-            t_l_r, b_r_r = t_l / (self.gridSize-1), (b_r-1) / (self.gridSize-1)
-            correct_aabb = jt.zeros_like(new_aabb)
-            correct_aabb[0] = (1-t_l_r)*self.aabb[0] + t_l_r*self.aabb[1]
-            correct_aabb[1] = (1-b_r_r)*self.aabb[0] + b_r_r*self.aabb[1]
-            print("aabb", new_aabb, "\ncorrect aabb", correct_aabb)
-            new_aabb = correct_aabb
+            self.density_line[i] = self.density_line[i].detach()[...,t_l[mode0]:b_r[mode0],:]
+            self.app_line[i] = self.app_line[i].detach()[...,t_l[mode0]:b_r[mode0],:]
+        with jt.no_grad():
+            if not jt.all(self.alphaMask.gridSize == self.gridSize):
+                t_l_r, b_r_r = t_l / (self.gridSize-1), (b_r-1) / (self.gridSize-1)
+                correct_aabb = jt.zeros_like(new_aabb)
+                correct_aabb[0] = (1-t_l_r)*self.aabb[0] + t_l_r*self.aabb[1]
+                correct_aabb[1] = (1-b_r_r)*self.aabb[0] + b_r_r*self.aabb[1]
+                print("aabb", new_aabb, "\ncorrect aabb", correct_aabb)
+                new_aabb = correct_aabb
 
-        newSize = b_r - t_l
-        self.aabb = new_aabb
-        self.update_stepSize((newSize[0], newSize[1], newSize[2]))
+            newSize = b_r - t_l
+            self.aabb = new_aabb
+            self.update_stepSize((newSize[0], newSize[1], newSize[2]))
 
     def density_L1(self):
         total = 0

@@ -1,6 +1,5 @@
 import os,imageio,sys
 import jittor as jt
-from numpy import dtype
 from tqdm.auto import tqdm
 from dataLoader.ray_utils import get_rays
 from models.tensoRF import TensorVM, TensorCP, raw2alpha, TensorVMSplit, AlphaGridMask
@@ -106,7 +105,7 @@ def evaluation_path(test_dataset,tensorf, c2ws, renderer, savePath=None, N_vis=5
 
         W, H = test_dataset.img_wh
 
-        c2w = jt.array(c2w,dtype=float)
+        c2w = jt.float32(c2w)
         rays_o, rays_d = get_rays(test_dataset.directions, c2w)  # both (h*w, 3)
         if ndc_ray:
             rays_o, rays_d = ndc_rays_blender(H, W, test_dataset.focal[0], 1.0, rays_o, rays_d)
