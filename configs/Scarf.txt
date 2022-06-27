@@ -1,6 +1,6 @@
 
 dataset_name = blender
-datadir = ./../JNeRF/data/Scarf
+datadir = ./data/Scarf
 expname =  scarf
 basedir = ./log
 
@@ -12,7 +12,7 @@ N_voxel_final = 27000000 # 300**3
 upsamp_list = [2000,3000,4000,5500,7000]
 update_AlphaMask_list = [2000,4000]
 
-scene_box=[-30., -30., -30., 30., 30., 30.]
+scene_box=[-10., -10., -10., 10., 10., 10.]
 near_far=[5., 35.]
 
 N_vis = 5

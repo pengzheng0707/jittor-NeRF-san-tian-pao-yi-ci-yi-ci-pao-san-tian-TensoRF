@@ -1,19 +1,19 @@
 
 dataset_name = blender
 datadir = ./data/Coffee
-expname =  coffee3
+expname =  coffee
 basedir = ./log
 
 n_iters = 30000
-batch_size = 4096
+batch_size = 1024
 
 N_voxel_init = 2097156 # 128**3
 N_voxel_final = 27000000 # 300**3
 upsamp_list = [2000,3000,4000,5500,7000]
 update_AlphaMask_list = [2000,4000]
 
-scene_box=[-0.2, -0.1, -0.2, 0.2, 0.8, 0.2]
-near_far=[0.2, 2.0]
+scene_box=[-0.5, -0.5, -0.5, 0.5, 2., 0.5]
+near_far=[0., 3.]
 
 N_vis = 5
 vis_every = 10000

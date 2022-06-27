@@ -2,10 +2,15 @@ import  re
 import jittor as jt
 import numpy as np
 from jittor import searchsorted
-from kornia import create_meshgrid
 jt.flags.use_cuda = 1
 
 # from utils import index_point_feature
+
+def create_meshgrid(height,width):
+    xs=jt.linspace(0, width - 1, width)
+    ys=jt.linspace(0, height - 1, height)
+    base_grid=jt.stack(jt.meshgrid([xs, ys]), dim=-1)
+    return base_grid.permute(1, 0, 2).unsqueeze(0)
 
 def depth2dist(z_vals, cos_angle):
     # z_vals: [N_ray N_sample]
@@ -32,7 +37,7 @@ def get_ray_directions(H, W, focal, center=None):
     Outputs:
         directions: (H, W, 3), the direction of the rays in camera coordinate
     """
-    grid = create_meshgrid(H, W, normalized_coordinates=False)[0] + 0.5
+    grid = create_meshgrid(H, W)[0] + 0.5
 
     i, j = grid.unbind(-1)
     #TODO:直接用jittor计算
@@ -43,13 +48,10 @@ def get_ray_directions(H, W, focal, center=None):
     # cent = center if center is not None else [W / 2, H / 2]
     # directions = jt.stack([(i - cent[0]) / focal[0], (j - cent[1]) / focal[1], jt.ones_like(i)], -1)  # (H, W, 3)
 
-    i=i.numpy()
-    j=j.numpy()
     # the direction here is without +0.5 pixel centering as calibration is not so accurate
     # see https://github.com/bmild/nerf/issues/24
     cent = center if center is not None else [W / 2, H / 2]
-    directions = np.stack([(i - cent[0]) / focal[0], (j - cent[1]) / focal[1], np.ones_like(i)], -1)  # (H, W, 3)
-    directions=jt.array(directions)
+    directions = jt.stack([(i - cent[0]) / focal[0], (j - cent[1]) / focal[1], jt.ones_like(i)], -1)  # (H, W, 3)
     return directions
 
 
@@ -63,10 +65,8 @@ def get_ray_directions_blender(H, W, focal, center=None):
     Outputs:
         directions: (H, W, 3), the direction of the rays in camera coordinate
     """
-    grid = create_meshgrid(H, W, normalized_coordinates=False)[0]+0.5
+    grid = create_meshgrid(H, W)[0]+0.5
     i, j = grid.unbind(-1)
-    i=jt.array(i.numpy())   #TODO:改用jittor
-    j=jt.array(j.numpy())
     # the direction here is without +0.5 pixel centering as calibration is not so accurate
     # see https://github.com/bmild/nerf/issues/24
     cent = center if center is not None else [W / 2, H / 2]

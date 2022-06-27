@@ -1,7 +1,7 @@
 
 dataset_name = blender
 datadir = ./data/Car
-expname =  car_test4
+expname =  car_test5
 basedir = ./log
 
 n_iters = 30000
@@ -12,7 +12,7 @@ N_voxel_final = 27000000 # 300**3
 upsamp_list = [2000,3000,4000,5500,7000]
 update_AlphaMask_list = [2000,4000]
 
-scene_box=[2., -0.4, -3., 12.5, 5., 3.]
+scene_box=[2., -0.4, -3., 13., 5., 3.]
 near_far=[4., 20.]
 
 N_vis = 5

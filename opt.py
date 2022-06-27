@@ -106,7 +106,7 @@ def config_parser(cmd=None):
 
 
     ## blender flags
-    parser.add_argument("--white_bkgd", action='store_true',
+    parser.add_argument("--white_bkgd", default=True,
                         help='set to render synthetic data on a white bkgd (always use for dvoxels)')
 
 

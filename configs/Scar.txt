@@ -1,6 +1,6 @@
 
 dataset_name = blender
-datadir = ./../JNeRF/data/Scar
+datadir = ./data/Scar
 expname =  scar2
 basedir = ./log
 

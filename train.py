@@ -5,7 +5,6 @@ from opt import config_parser
 
 import jittor as jt
 
-import json, random
 from renderer import *
 from utils import *
 from tensorboardX import SummaryWriter
@@ -49,7 +48,7 @@ def export_mesh(args):
     tensorf.load(ckpt)
     tensorf.gridSize=jt.tolist(tensorf.gridSize)
     alpha,_ = tensorf.getDenseAlpha()
-    convert_sdf_samples_to_ply(alpha, f'{args.ckpt[:-3]}.ply',bbox=tensorf.aabb, level=0.005)
+    convert_sdf_samples_to_ply(alpha, f'{args.ckpt[:-3]}ply',bbox=tensorf.aabb, level=0.005)
 
 
 @jt.no_grad()
@@ -176,7 +175,6 @@ def reconstruction(args):
     tvreg = TVLoss()
     print(f"initial TV_weight density: {TV_weight_density} appearance: {TV_weight_app}")
 
-
     pbar = tqdm(range(args.n_iters), miniters=args.progress_refresh_rate, file=sys.stdout)
     for iteration in pbar:
 
@@ -214,7 +212,6 @@ def reconstruction(args):
             total_loss = total_loss + loss_tv
             summary_writer.add_scalar('train/reg_tv_app', loss_tv.detach().item(), global_step=iteration)
 
-      
         optimizer.step(total_loss)
 
         loss = loss.detach().item()
@@ -287,8 +284,9 @@ def reconstruction(args):
         if iteration%500==0 or iteration in range(50):
             jt.clean_graph()
             jt.sync_all()
-            jt.display_memory_info()
+            #jt.display_memory_info()
             jt.gc()
+
 
         #jt.sync_all()
         #jt.display_memory_info()
