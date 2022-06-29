@@ -82,8 +82,8 @@ class BlenderDataset(Dataset):
             self.all_rgbs += [img]
 
 
-            rays_o, rays_d = get_rays(self.directions, c2w)  # both (h*w, 3)
-            self.all_rays += [jt.concat([rays_o, rays_d], 1)]  # (h*w, 6)
+            rays_o, rays_d, dx = get_rays(self.directions, c2w)  # both (h*w, 3)
+            self.all_rays += [jt.concat([rays_o, rays_d, dx], 1)]  # (h*w, 9)
 
 
         self.poses = jt.stack(self.poses)

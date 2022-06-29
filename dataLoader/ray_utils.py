@@ -93,11 +93,13 @@ def get_rays(directions, c2w):
     # rays_d = rays_d / jt.norm(rays_d, dim=-1, keepdim=True)
     # The origin of all rays is the camera origin in world coordinate
     rays_o = c2w[:3, 3].expand(rays_d.shape)  # (H, W, 3)
+    dx=jt.sqrt(jt.sum((rays_d[:-1, :, :] - rays_d[1:, :, :]) ** 2, -1))
+    dx=jt.concat([dx, dx[-2:-1, :]], 0).view(-1,1)
 
     rays_d = rays_d.view(-1, 3)
     rays_o = rays_o.view(-1, 3)
 
-    return rays_o, rays_d
+    return rays_o, rays_d, dx
 
 
 def ndc_rays_blender(H, W, focal, near, rays_o, rays_d):
@@ -143,7 +145,7 @@ def sample_pdf(bins, weights, N_samples, det=False, pytest=False):
 
     # Get pdf
     weights = weights + 1e-5  # prevent nans
-    pdf = weights / jt.sum(weights, -1, keepdim=True)
+    pdf = weights / jt.sum(weights, -1, keepdims=True)
     cdf = jt.cumsum(pdf, -1)
     cdf = jt.concat([jt.zeros_like(cdf[..., :1]), cdf], -1)  # (batch, len(bins))
 
@@ -152,7 +154,7 @@ def sample_pdf(bins, weights, N_samples, det=False, pytest=False):
         u = jt.linspace(0., 1., steps=N_samples)
         u = u.expand(list(cdf.shape[:-1]) + [N_samples])
     else:
-        u = jt.rand(list(cdf.shape[:-1]) + [N_samples])
+        u = jt.random(list(cdf.shape[:-1]) + [N_samples])
 
     # Pytest, overwrite u with numpy's fixed random numbers
     if pytest:
@@ -167,9 +169,9 @@ def sample_pdf(bins, weights, N_samples, det=False, pytest=False):
 
     # Invert CDF
 
-    inds = searchsorted(cdf.detach(), u, right=True)
-    below = jt.max(jt.zeros_like(inds - 1), inds - 1)
-    above = jt.min((cdf.shape[-1] - 1) * jt.ones_like(inds), inds)
+    inds = jt.searchsorted(cdf, u, right=True)
+    below = jt.maximum(jt.zeros_like(inds - 1), inds - 1)
+    above = jt.minimum((cdf.shape[-1] - 1) * jt.ones_like(inds), inds)
     inds_g = jt.stack([below, above], -1)  # (batch, N_samples, 2)
 
     matched_shape = [inds_g.shape[0], inds_g.shape[1], cdf.shape[-1]]
@@ -177,7 +179,7 @@ def sample_pdf(bins, weights, N_samples, det=False, pytest=False):
     bins_g = jt.gather(bins.unsqueeze(1).expand(matched_shape), 2, inds_g)
 
     denom = (cdf_g[..., 1] - cdf_g[..., 0])
-    denom = jt.where(denom < 1e-5, jt.ones_like(denom), denom)
+    denom[denom<1e-5] = 1.0
     t = (u - cdf_g[..., 0]) / denom
     samples = bins_g[..., 0] + t * (bins_g[..., 1] - bins_g[..., 0])
 

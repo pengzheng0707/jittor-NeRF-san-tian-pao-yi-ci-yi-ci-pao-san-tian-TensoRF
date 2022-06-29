@@ -4,6 +4,7 @@ from jittor import nn
 from .sh import eval_sh_bases
 import numpy as np
 import time
+from dataLoader.ray_utils import sample_pdf
 jt.flags.use_cuda = 1
 
 def positional_encoding(positions, freqs):
@@ -284,8 +285,8 @@ class TensorBase(nn.Module):
         mask_outbbox = ((self.aabb[0] > rays_pts) | (rays_pts > self.aabb[1])).any(dim=-1)
         return rays_pts, interpx, jt.logical_not(mask_outbbox)
 
-    def sample_ray(self, rays_o, rays_d, is_train=True, N_samples=-1):
-        N_samples = N_samples if N_samples>0 else self.nSamples
+    def sample_ray(self, rays_o, rays_d, dx, is_train=True, N_samples=-1):
+        N_samples = N_samples+1 if N_samples>0 else self.nSamples
         stepsize = self.stepSize
         near, far = self.near_far
         vec = jt.where(rays_d==0, jt.full_like(rays_d, 1e-6), rays_d)
@@ -299,12 +300,77 @@ class TensorBase(nn.Module):
             rng += jt.rand_like(rng[:,[0]])
         step = stepsize * rng
         interpx = (t_min[...,None] + step)
-
-        rays_pts = rays_o[...,None,:] + rays_d[...,None,:] * interpx[...,None]
+        # interpx = jt.linspace(0., 1., N_samples)
+        # interpx = near + (far - near) * interpx
+        # interpx = jt.broadcast(interpx, [rays_o.shape[0], N_samples])
+        means, covs = self.cast_rays(interpx, rays_o, rays_d, dx)
+        rays_pts=means+covs*jt.randn(covs.shape)
+        #rays_pts = rays_o[...,None,:] + rays_d[...,None,:] * interpx[...,None]
         mask_outbbox = ((self.aabb[0]>rays_pts) | (rays_pts>self.aabb[1])).any(dim=-1)
 
         return rays_pts, interpx, jt.logical_not(mask_outbbox)
 
+    def cast_rays(self,t_samples, origins, directions, radii, diagonal=True):
+        """Cast rays (cone- or cylinder-shaped) and featurize sections of it.
+        Args:
+            t_samples: float array [B, n_sample+1], the "fencepost" distances along the ray.
+            origins: float array [B, 3], the ray origin coordinates.
+            directions [B, 3]: float array, the ray direction vectors.
+            radii[B, 1]: float array, the radii (base radii for cones) of the rays.
+            ray_shape: string, the shape of the ray, must be 'cone' or 'cylinder'.
+            diagonal: boolean, whether or not the covariance matrices should be diagonal.
+        Returns:
+            a tuple of arrays of means and covariances.
+        """
+        t0 = t_samples[..., :-1]  # [B, n_samples]
+        t1 = t_samples[..., 1:]
+
+        gaussian_fn = self.conical_frustum_to_gaussian
+
+        means, covs = gaussian_fn(directions, t0, t1, radii, diagonal)
+        means = means + jt.unsqueeze(origins, dim=-2)
+        return means, covs
+
+    def conical_frustum_to_gaussian(self, directions, t0, t1, base_radius, diagonal, stable=True):
+        """Approximate a conical frustum as a Gaussian distribution (mean+cov).
+        Assumes the ray is originating from the origin, and base_radius is the
+        radius at dist=1. Doesn't assume `directions` is normalized.
+        Args:
+            directions: torch.tensor float32 3-vector, the axis of the cone
+            t0: float, the starting distance of the frustum.
+            t1: float, the ending distance of the frustum.
+            base_radius: float, the scale of the radius as a function of distance.
+            diagonal: boolean, whether or the Gaussian will be diagonal or full-covariance.
+            stable: boolean, whether or not to use the stable computation described in
+            the paper (setting this to False will cause catastrophic failure).
+        Returns:
+            a Gaussian (mean and covariance).
+        """
+
+        mu = (t0 + t1) / 2
+        hw = (t1 - t0) / 2
+        t_mean = mu + (2 * mu * hw ** 2) / (3 * mu ** 2 + hw ** 2)
+        t_var = (hw ** 2) / 3 - (4 / 15) * ((hw ** 4 * (12 * mu ** 2 - hw ** 2)) /
+                                            (3 * mu ** 2 + hw ** 2) ** 2)
+        r_var = base_radius ** 2 * ((mu ** 2) / 4 + (5 / 12) * hw ** 2 - 4 / 15 *
+                                    (hw ** 4) / (3 * mu ** 2 + hw ** 2))
+
+        return self.lift_gaussian(directions, t_mean, t_var, r_var)
+
+    def lift_gaussian(self,directions, t_mean, t_var, r_var):
+        """Lift a Gaussian defined along a ray to 3D coordinates."""
+        mean = jt.unsqueeze(directions, dim=-2) * jt.unsqueeze(t_mean, dim=-1)  # [B, 1, 3]*[B, N, 1] = [B, N, 3]
+        d_norm_denominator = jt.sum(directions ** 2, dim=-1, keepdims=True) + 1e-10
+        # min_denominator = jt.full_like(d_norm_denominator, 1e-10)
+        # d_norm_denominator = jt.maximum(min_denominator, d_norm_denominator)
+
+        d_outer_diag = directions ** 2  # eq (16)
+        null_outer_diag = 1 - d_outer_diag / d_norm_denominator
+        t_cov_diag = jt.unsqueeze(t_var, dim=-1) * jt.unsqueeze(d_outer_diag,
+                                                                    dim=-2)  # [B, N, 1] * [B, 1, 3] = [B, N, 3]
+        xy_cov_diag = jt.unsqueeze(r_var, dim=-1) * jt.unsqueeze(null_outer_diag, dim=-2)
+        cov_diag = t_cov_diag + xy_cov_diag
+        return mean, cov_diag
 
     def shrink(self, new_aabb, voxel_size):
         pass
@@ -370,7 +436,7 @@ class TensorBase(nn.Module):
         for idx_chunk in idx_chunks:
             rays_chunk = all_rays[idx_chunk]
 
-            rays_o, rays_d = rays_chunk[..., :3], rays_chunk[..., 3:6]
+            rays_o, rays_d, dx  = rays_chunk[..., :3], rays_chunk[..., 3:6], rays_chunk[..., 6:]
             if bbox_only:
                 vec = jt.where(rays_d == 0, jt.full_like(rays_d, 1e-6), rays_d)
                 rate_a = (self.aabb[1] - rays_o) / vec
@@ -380,7 +446,7 @@ class TensorBase(nn.Module):
                 mask_inbbox = t_max > t_min
 
             else:
-                xyz_sampled, _,_ = self.sample_ray(rays_o, rays_d, N_samples=N_samples, is_train=False)
+                xyz_sampled, _,_ = self.sample_ray(rays_o, rays_d, dx, N_samples=N_samples, is_train=False)
                 mask_inbbox= (self.alphaMask.sample_alpha(xyz_sampled).view(xyz_sampled.shape[:-1]) > 0).any(-1)
 
             mask_filtered.append(mask_inbbox)
@@ -422,9 +488,10 @@ class TensorBase(nn.Module):
 
 
     def execute(self, rays_chunk, white_bg=True, is_train=False, ndc_ray=False, N_samples=-1):
-
+        N_importance=0
         # sample points
         viewdirs = rays_chunk[:, 3:6]
+        dx=rays_chunk[:, 6:]
         if ndc_ray:
             xyz_sampled, z_vals, ray_valid = self.sample_ray_ndc(rays_chunk[:, :3], viewdirs, is_train=is_train,N_samples=N_samples)
             dists = jt.concat((z_vals[:, 1:] - z_vals[:, :-1], jt.zeros_like(z_vals[:, :1])), dim=-1)
@@ -432,9 +499,9 @@ class TensorBase(nn.Module):
             dists = dists * rays_norm
             viewdirs = viewdirs / rays_norm
         else:
-            xyz_sampled, z_vals, ray_valid = self.sample_ray(rays_chunk[:, :3], viewdirs, is_train=is_train,N_samples=N_samples)
-            dists = jt.concat((z_vals[:, 1:] - z_vals[:, :-1], jt.zeros_like(z_vals[:, :1])), dim=-1)
-        viewdirs = viewdirs.view(-1, 1, 3).expand(xyz_sampled.shape)
+            xyz_sampled, z_vals, ray_valid = self.sample_ray(rays_chunk[:, :3], viewdirs, dx, is_train=is_train,N_samples=N_samples)
+            dists = (z_vals[:, 1:] - z_vals[:, :-1])#* jt.norm(jt.unsqueeze(viewdirs, dim=-2), dim=-1)
+            z_vals = .5 * (z_vals[...,1:] + z_vals[...,:-1])
         
         if self.alphaMask is not None:
             alphas = self.alphaMask.sample_alpha(xyz_sampled[ray_valid])
@@ -452,14 +519,14 @@ class TensorBase(nn.Module):
             sigma_feature = self.compute_densityfeature(xyz_sampled[ray_valid])
 
             validsigma = self.feature2density(sigma_feature)
-            #TODO:sigma.start_grad()
             sigma[ray_valid] = validsigma
 
 
         alpha, weight, bg_weight = raw2alpha(sigma, dists * self.distance_scale)
 
-        app_mask = weight > self.rayMarch_weight_thres
 
+        app_mask = weight > self.rayMarch_weight_thres
+        viewdirs = viewdirs.view(-1, 1, 3).expand(xyz_sampled.shape)
         if app_mask.any():
             app_features = self.compute_appfeature(xyz_sampled[app_mask])
             valid_rgbs = self.renderModule(xyz_sampled[app_mask], viewdirs[app_mask], app_features)

@@ -1,7 +1,7 @@
 
 dataset_name = blender
 datadir = ./data/Scar
-expname =  scar2
+expname =  Scar
 basedir = ./log
 
 n_iters = 30000
@@ -12,7 +12,7 @@ N_voxel_final = 27000000 # 300**3
 upsamp_list = [2000,3000,4000,5500,7000]
 update_AlphaMask_list = [2000,4000]
 
-scene_box=[-4.5, -0.2, -1.65, 4.5, 2.5, 1.6]
+scene_box=[-5., -1., -2., 5., 3., 2.]
 near_far=[10., 25.0]
 
 N_vis = 5

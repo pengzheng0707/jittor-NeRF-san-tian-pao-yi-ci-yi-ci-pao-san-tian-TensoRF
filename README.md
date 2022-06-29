@@ -10,7 +10,7 @@ TensoRF的jittor实现，本项目用于第二届计图人工智能挑战赛
 
 #### 安装依赖
 ```
-pip install tqdm scikit-image opencv-python configargparse lpips imageio-ffmpeg lpips tensorboardX
+pip install tqdm scikit-image opencv-python configargparse imageio-ffmpeg tensorboardX
 ```
 
 ## 运行
