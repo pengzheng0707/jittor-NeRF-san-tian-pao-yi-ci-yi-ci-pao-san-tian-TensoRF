@@ -13,7 +13,7 @@ upsamp_list = [2000,3000,4000,5500,7000]
 update_AlphaMask_list = [2000,4000]
 
 scene_box=[-2.5, -0.5, -1.7, 2.5, 2.2, 2.2]
-near_far=[2., 6.]
+near_far=[1., 8.]
 
 N_vis = 5
 vis_every = 10000

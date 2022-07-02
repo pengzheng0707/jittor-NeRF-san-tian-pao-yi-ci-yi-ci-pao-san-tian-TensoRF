@@ -1,5 +1,6 @@
 
 import os
+from numpy import row_stack
 from tqdm.auto import tqdm
 from opt import config_parser
 
@@ -162,9 +163,9 @@ def reconstruction(args):
     PSNRs,PSNRs_test = [],[0]
 
     allrays, allrgbs = train_dataset.all_rays, train_dataset.all_rgbs
-    if not args.ndc_ray:
-        allrays, allrgbs = tensorf.filtering_rays(allrays, allrgbs, bbox_only=True)
-    trainingSampler = SimpleSampler(allrays.shape[0], args.batch_size)
+    # if not args.ndc_ray:
+    #     allrays, allrgbs = tensorf.filtering_rays(allrays, allrgbs, bbox_only=True)
+    #trainingSampler = SimpleSampler(allrays.shape[0], args.batch_size)
 
     Ortho_reg_weight = args.Ortho_weight
     print("initial Ortho_reg_weight", Ortho_reg_weight)
@@ -176,22 +177,46 @@ def reconstruction(args):
     print(f"initial TV_weight density: {TV_weight_density} appearance: {TV_weight_app}")
 
     pbar = tqdm(range(args.n_iters), miniters=args.progress_refresh_rate, file=sys.stdout)
+    N_dix=np.random.permutation(12000000)
+    idx=0
     for iteration in pbar:
 
+        #ray_idx = trainingSampler.nextids()
 
-        ray_idx = trainingSampler.nextids()
+        ite=N_dix[idx:idx+256]
+        ray_idx=[]
+        for it in ite: 
+            out_start=(it//40000)*640000
+            in_start=(it%40000)
+            row_start=(in_start//200)*4*800
+            col_start=(in_start%200)*4
+            total_start=row_start+col_start+out_start
+            ray_idx += [total_start+i*800+j for i in range(4) for j in range(4)]
+
 
         rays_train, rgb_train = allrays[ray_idx], allrgbs[ray_idx]
+        idx=idx+256
 
         #rgb_map, alphas_map, depth_map, weights, uncertainty
-        rgb_map, alphas_map, depth_map, weights, uncertainty = renderer(rays_train, tensorf, chunk=args.batch_size,
+        rgb_map, alphas_map, depth_map, weights, uncertainty, ref_depth_map, bk_depth_map = renderer(rays_train, tensorf, 4096,
                                 N_samples=nSamples, white_bg = white_bg, ndc_ray=ndc_ray, is_train=True)
 
         loss = jt.mean((rgb_map - rgb_train) ** 2)
+        bdc_loss=jt.mean(jt.abs(ref_depth_map - bk_depth_map))
+        depth_loss=jt.zeros((256))
+        for i in range(256):
+            r=rgb_map[i*16:i*16+16]
+            d=depth_map[i*16:i*16+16]
+            r_std=jt.std(r)
+            d_std=jt.std(d)
+            depth_loss[i]=jt.exp(-5 * r_std) * d_std
+        depth_loss=jt.mean(depth_loss)
+
+        
 
 
         # loss
-        total_loss = loss
+        total_loss = loss + bdc_loss + depth_loss 
         if Ortho_reg_weight > 0:
             loss_reg = tensorf.vector_comp_diffs()
             total_loss += Ortho_reg_weight*loss_reg
@@ -256,10 +281,10 @@ def reconstruction(args):
                 print("continuing L1_reg_weight", L1_reg_weight)
 
 
-            if not args.ndc_ray and iteration == update_AlphaMask_list[1]:
-                # filter rays outside the bbox
-                allrays,allrgbs = tensorf.filtering_rays(allrays,allrgbs)
-                trainingSampler = SimpleSampler(allrgbs.shape[0], args.batch_size)
+            # if not args.ndc_ray and iteration == update_AlphaMask_list[1]:
+            #     # filter rays outside the bbox
+            #     allrays,allrgbs = tensorf.filtering_rays(allrays,allrgbs)
+            #     trainingSampler = SimpleSampler(allrgbs.shape[0], args.batch_size)
             jt.clean_graph()
             jt.sync_all()
             jt.gc()

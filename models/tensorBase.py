@@ -24,6 +24,14 @@ def raw2alpha(sigma, dist):
     weights = alpha * T[:, :-1]  # [N_rays, N_samples]
     return alpha, weights, T[:,-1:]
 
+def backdepth(sigma, dist):
+    # sigma, dist  [N_rays, N_samples]
+    alpha = 1. - jt.exp(-sigma*dist)
+
+    T = jt.flip(jt.cumprod(jt.concat([jt.ones((alpha.shape[0], 1)), jt.flip(1. - alpha + 1e-10, -1)], -1), -1),-1)
+
+    weights = alpha * T[:, :-1]  # [N_rays, N_samples]
+    return alpha, weights, T[:,-1:]
 
 def SHRender(xyz_sampled, viewdirs, features):
     sh_mult = eval_sh_bases(2, viewdirs)[:, None]
@@ -82,6 +90,45 @@ class MLPRender_Fea(nn.Module):
         rgb = jt.sigmoid(rgb)
 
         return rgb
+
+class MLPRender_Ref(nn.Module):
+    def __init__(self,inChanel, viewpe=6, feape=6, featureC=128):
+        super(MLPRender_Ref, self).__init__()
+
+        self.in_mlpC = 2*viewpe*3 + 2*feape*inChanel + 3 + inChanel
+        self.viewpe = viewpe
+        self.feape = feape
+
+        self.mlp = nn.Sequential(nn.Linear(self.in_mlpC, featureC), nn.ReLU(), nn.Linear(featureC, featureC), nn.ReLU(), nn.Linear(featureC,3))
+        nn.init.constant_(self.mlp[-1].bias, 0)
+
+    def execute(self, pts, viewdirs, features):
+        indata = [features, viewdirs]
+        if self.feape > 0:
+            indata += [positional_encoding(features, self.feape)]
+        if self.viewpe > 0:
+            indata += [positional_encoding(viewdirs, self.viewpe)]
+        mlp_in = jt.concat(indata, dim=-1)
+        rgb = self.mlp(mlp_in)
+        rgb = jt.sigmoid(rgb)
+
+        return rgb
+
+class MLPRef_fac(nn.Module):
+    def __init__(self,inChanel, featureChanel=128,outChanel=1):
+        super(MLPRef_fac, self).__init__()
+        self.mlp = nn.Sequential(nn.Linear(inChanel, featureChanel), nn.ReLU(), nn.Linear( featureChanel, outChanel), nn.ReLU())
+
+    def execute(self, features):
+        return self.mlp(features)
+
+class MLPRef_den(nn.Module):
+    def __init__(self,inChanel, featureChanel=128,outChanel=1):
+        super(MLPRef_den, self).__init__()
+        self.mlp = nn.Sequential(nn.Linear(inChanel, featureChanel), nn.ReLU(), nn.Linear( featureChanel, outChanel), nn.ReLU())
+
+    def execute(self, features):
+        return self.mlp(features)
 
 class MLPRender_PE(nn.Module):
     def __init__(self,inChanel, viewpe=6, pospe=6, featureC=128):
@@ -170,6 +217,9 @@ class TensorBase(nn.Module):
             self.renderModule = MLPRender_PE(self.app_dim, view_pe, pos_pe, featureC)
         elif shadingMode == 'MLP_Fea':
             self.renderModule = MLPRender_Fea(self.app_dim, view_pe, fea_pe, featureC)
+            self.refModule = MLPRender_Ref(self.app_dim, view_pe, fea_pe, featureC)
+            self.ref_fac_Module=MLPRef_fac(1)
+            self.ref_den_Module=MLPRef_den(1)
         elif shadingMode == 'MLP':
             self.renderModule = MLPRender(self.app_dim, view_pe, featureC)
         elif shadingMode == 'SH':
@@ -512,17 +562,26 @@ class TensorBase(nn.Module):
 
 
         sigma = jt.zeros(xyz_sampled.shape[:-1])
+        ref_factor = jt.zeros(xyz_sampled.shape[:-1])
+        ref_den = jt.zeros(xyz_sampled.shape[:-1])
         rgb = jt.zeros((*xyz_sampled.shape[:2], 3))
+        rgb_ref = jt.zeros((*xyz_sampled.shape[:2], 3))
 
         if ray_valid.any():
             xyz_sampled = self.normalize_coord(xyz_sampled)
             sigma_feature = self.compute_densityfeature(xyz_sampled[ray_valid])
 
             validsigma = self.feature2density(sigma_feature)
+            validfactor=self.ref_fac_Module(sigma_feature.view(-1,1))
+            validrefden=self.ref_den_Module(sigma_feature.view(-1,1))
             sigma[ray_valid] = validsigma
+            ref_factor[ray_valid]=validfactor.view(-1)
+            ref_den[ray_valid]=validrefden.view(-1)
 
 
         alpha, weight, bg_weight = raw2alpha(sigma, dists * self.distance_scale)
+        t3, ref_weight, t4 = raw2alpha(ref_den, dists * self.distance_scale)
+        bkalpha, bkweight, bkbg=backdepth(ref_den, dists * self.distance_scale) 
 
 
         app_mask = weight > self.rayMarch_weight_thres
@@ -531,9 +590,11 @@ class TensorBase(nn.Module):
             app_features = self.compute_appfeature(xyz_sampled[app_mask])
             valid_rgbs = self.renderModule(xyz_sampled[app_mask], viewdirs[app_mask], app_features)
             rgb[app_mask] = valid_rgbs
+            valid_ref = self.refModule(xyz_sampled[app_mask], viewdirs[app_mask], app_features)
+            rgb_ref[app_mask] = valid_ref
 
         acc_map = jt.sum(weight, -1)
-        rgb_map = jt.sum(weight[..., None] * rgb, -2)
+        rgb_map = jt.sum(weight[..., None] * rgb, -2) + jt.sum(ref_weight[..., None] * rgb_ref, -2) * jt.sum(weight * ref_factor, -1)[..., None]
 
         if white_bg or (is_train and jt.rand((1,))<0.5):
             rgb_map = rgb_map + (1. - acc_map[..., None])
@@ -541,9 +602,10 @@ class TensorBase(nn.Module):
         
         rgb_map = rgb_map.clamp(0,1)
 
-        with jt.no_grad():
-            depth_map = jt.sum(weight * z_vals, -1)
-            depth_map = depth_map + (1. - acc_map) * rays_chunk[..., -1]
+        depth_map = jt.sum(weight * z_vals, -1)
+        ref_depth_map = jt.sum(ref_weight * z_vals, -1)
+        bk_depth_map=jt.sum(bkweight * z_vals, -1)
+        #depth_map = depth_map + (1. - acc_map) * rays_chunk[..., -1]
 
-        return rgb_map, depth_map # rgb, sigma, alpha, weight, bg_weight
+        return rgb_map, depth_map, ref_depth_map, bk_depth_map # rgb, sigma, alpha, weight, bg_weight
 
