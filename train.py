@@ -1,4 +1,5 @@
 
+from lzma import FILTER_LZMA1
 import os
 from numpy import row_stack
 from tqdm.auto import tqdm
@@ -177,13 +178,13 @@ def reconstruction(args):
     print(f"initial TV_weight density: {TV_weight_density} appearance: {TV_weight_app}")
 
     pbar = tqdm(range(args.n_iters), miniters=args.progress_refresh_rate, file=sys.stdout)
-    N_dix=np.random.permutation(12000000)
+    N_dix=np.random.permutation(4000000)
     idx=0
     for iteration in pbar:
 
         #ray_idx = trainingSampler.nextids()
 
-        ite=N_dix[idx:idx+256]
+        ite=N_dix[idx:idx+64]
         ray_idx=[]
         for it in ite: 
             out_start=(it//40000)*640000
@@ -195,28 +196,58 @@ def reconstruction(args):
 
 
         rays_train, rgb_train = allrays[ray_idx], allrgbs[ray_idx]
-        idx=idx+256
+        idx=idx+64
 
         #rgb_map, alphas_map, depth_map, weights, uncertainty
-        rgb_map, alphas_map, depth_map, weights, uncertainty, ref_depth_map, bk_depth_map = renderer(rays_train, tensorf, 4096,
+        rgb_map, alphas_map, depth_map, weights, uncertainty, ref_depth_map, bk_depth_map ,trans_rgb_map, frac_map, ref_rgb_map= renderer(rays_train, tensorf, 1024,
                                 N_samples=nSamples, white_bg = white_bg, ndc_ray=ndc_ray, is_train=True)
 
         loss = jt.mean((rgb_map - rgb_train) ** 2)
-        bdc_loss=jt.mean(jt.abs(ref_depth_map - bk_depth_map))
-        depth_loss=jt.zeros((256))
-        for i in range(256):
-            r=rgb_map[i*16:i*16+16]
+        trans_loss = jt.mean((trans_rgb_map - rgb_train) ** 2)
+        bdc_loss=jt.nn.l1_loss(ref_depth_map,bk_depth_map)
+        depth_loss=jt.zeros((64))
+        frac_smo_loss=jt.zeros((64))
+        for i in range(64):
+            r=trans_rgb_map[i*16:i*16+16]
             d=depth_map[i*16:i*16+16]
-            r_std=jt.std(r)
-            d_std=jt.std(d)
-            depth_loss[i]=jt.exp(-5 * r_std) * d_std
+            r_l1=jt.nn.l1_loss(r,r.mean())
+            d_l1=jt.nn.l1_loss(d,d.mean())
+            depth_loss[i]=jt.exp(-5 * r_l1).detach() * d_l1
+            f=frac_map[i*16:i*16+16]
+            frac_smo_loss[i]=jt.nn.l1_loss(f,f.mean())
+
         depth_loss=jt.mean(depth_loss)
+        frac_smo_loss=jt.mean(frac_smo_loss)
 
         
 
 
         # loss
-        total_loss = loss + bdc_loss + depth_loss 
+        w4=0.0001
+        if iteration < 1000:
+            w2=0.01
+            w3=0.01
+        elif 1000 <= iteration < 5000:
+            if w2 < 0.1:
+                w2=w2*1.01
+            w3=0.
+        else:
+            if w2>0.01:
+                w2=w2*0.99
+            w3=0.
+        if iteration < 6000:
+            w1=0.0001
+        elif 6000 <= iteration < 12000:
+            if w1 < 0.05:
+                w1=w1*1.01
+        elif 12000<= iteration < 15000:
+            if w1 >0.0001:
+                w1=w1*0.99
+        else:
+            w1=0.
+        
+        total_loss = loss + w1*bdc_loss + w2*depth_loss + w3*trans_loss + w4*frac_smo_loss
+
         if Ortho_reg_weight > 0:
             loss_reg = tensorf.vector_comp_diffs()
             total_loss += Ortho_reg_weight*loss_reg

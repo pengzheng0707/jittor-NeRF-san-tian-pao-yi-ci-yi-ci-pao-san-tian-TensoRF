@@ -1,7 +1,7 @@
 
 dataset_name = blender
 datadir = ./data/Car
-expname =  car_test5
+expname =  car_test15
 basedir = ./log
 
 n_iters = 30000
@@ -16,7 +16,7 @@ scene_box=[1., -2., -4., 14., 6., 4.]
 near_far=[4., 25.]
 
 N_vis = 5
-vis_every = 10000
+vis_every = 2000
 
 render_test = 1
 

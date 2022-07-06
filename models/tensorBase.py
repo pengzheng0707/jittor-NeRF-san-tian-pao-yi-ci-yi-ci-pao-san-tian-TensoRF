@@ -594,18 +594,25 @@ class TensorBase(nn.Module):
             rgb_ref[app_mask] = valid_ref
 
         acc_map = jt.sum(weight, -1)
-        rgb_map = jt.sum(weight[..., None] * rgb, -2) + jt.sum(ref_weight[..., None] * rgb_ref, -2) * jt.sum(weight * ref_factor, -1)[..., None]
+        trans_rgb_map = jt.sum(weight[..., None] * rgb, -2)
+        frac_map=jt.sum(weight * ref_factor, -1)[..., None]
+        ref_rgb_map = jt.sum(ref_weight[..., None] * rgb_ref, -2)
+        rgb_map = trans_rgb_map + ref_rgb_map * frac_map
 
         if white_bg or (is_train and jt.rand((1,))<0.5):
             rgb_map = rgb_map + (1. - acc_map[..., None])
+            trans_rgb_map = trans_rgb_map + (1. - acc_map[..., None])
+            ref_rgb_map = ref_rgb_map + (1. - acc_map[..., None])
 
         
         rgb_map = rgb_map.clamp(0,1)
+        ref_rgb_map = ref_rgb_map.clamp(0,1)
+        trans_rgb_map = trans_rgb_map.clamp(0,1)
 
         depth_map = jt.sum(weight * z_vals, -1)
         ref_depth_map = jt.sum(ref_weight * z_vals, -1)
         bk_depth_map=jt.sum(bkweight * z_vals, -1)
         #depth_map = depth_map + (1. - acc_map) * rays_chunk[..., -1]
 
-        return rgb_map, depth_map, ref_depth_map, bk_depth_map # rgb, sigma, alpha, weight, bg_weight
+        return rgb_map, depth_map, ref_depth_map, bk_depth_map, trans_rgb_map, frac_map, ref_rgb_map # rgb, sigma, alpha, weight, bg_weight
 
