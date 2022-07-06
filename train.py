@@ -64,6 +64,8 @@ def render_test(args):
         return
 
     ckpt = jt.load(args.ckpt)
+    for k in ckpt['state_dict'].keys():
+        ckpt['state_dict'][k]=jt.array(ckpt['state_dict'][k])
     kwargs = ckpt['kwargs']
 
     tensorf = eval(args.model_name)(**kwargs)
@@ -129,6 +131,8 @@ def reconstruction(args):
 
     if args.ckpt is not None:
         ckpt = jt.load(args.ckpt)
+        for k in ckpt['state_dict'].keys():
+            ckpt['state_dict'][k]=jt.array(ckpt['state_dict'][k])
         kwargs = ckpt['kwargs']
 
         tensorf = eval(args.model_name)(**kwargs)

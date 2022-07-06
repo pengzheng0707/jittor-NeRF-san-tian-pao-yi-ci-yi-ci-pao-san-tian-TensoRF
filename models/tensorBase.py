@@ -500,7 +500,7 @@ class TensorBase(nn.Module):
             viewdirs = viewdirs / rays_norm
         else:
             xyz_sampled, z_vals, ray_valid = self.sample_ray(rays_chunk[:, :3], viewdirs, dx, is_train=is_train,N_samples=N_samples)
-            dists = (z_vals[:, 1:] - z_vals[:, :-1])#* jt.norm(jt.unsqueeze(viewdirs, dim=-2), dim=-1)
+            dists = (z_vals[:, 1:] - z_vals[:, :-1]) * jt.norm(jt.unsqueeze(viewdirs, dim=-2), dim=-1)
             z_vals = .5 * (z_vals[...,1:] + z_vals[...,:-1])
         
         if self.alphaMask is not None:

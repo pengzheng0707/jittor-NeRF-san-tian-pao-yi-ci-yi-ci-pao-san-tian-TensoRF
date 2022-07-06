@@ -50,7 +50,7 @@ class BlenderDataset(Dataset):
 
         # ray directions for all pixels, same for all images (same H, W, focal)
         self.directions = get_ray_directions(h, w, [self.focal,self.focal])  # (h, w, 3)
-        self.directions = self.directions / jt.norm(self.directions, dim=-1, keepdim=True)
+        #self.directions = self.directions / jt.norm(self.directions, dim=-1, keepdim=True)
         self.intrinsics = jt.float64([[self.focal,0,w/2],[0,self.focal,h/2],[0,0,1]]).float32()
 
         self.image_paths = []

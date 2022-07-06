@@ -3,3 +3,14 @@
 log/
 *pycache*
 .vscode/launch.json
+data/
+
+data/Car/transforms_test.json
+data/Coffee/transforms_test.json
+data/Easyship/transforms_test.json
+data/Easyship/transforms_train.json
+data/Scar/transforms_test.json
+data/Scarf/transforms_test.json
+configs/Scar.txt
+configs/Easyship.txt
+configs/Car.txt

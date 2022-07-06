@@ -1,7 +1,7 @@
 
 dataset_name = blender
 datadir = ./data/Easyship
-expname =  ship7
+expname =  ship6
 basedir = ./log
 
 n_iters = 30000
@@ -12,8 +12,8 @@ N_voxel_final = 27000000 # 300**3
 upsamp_list = [2000,3000,4000,5500,7000]
 update_AlphaMask_list = [2000,4000]
 
-scene_box=[-2.5, -0.5, -1.7, 2.5, 2.2, 2.2]
-near_far=[2., 6.]
+scene_box=[-4., -2., -4., 4., 6., 4.]
+near_far=[0., 12.]
 
 N_vis = 5
 vis_every = 10000
