@@ -1,7 +1,7 @@
 
 dataset_name = blender
 datadir = ./data/Easyship
-expname =  ship6
+expname =  ship8
 basedir = ./log
 
 n_iters = 30000
@@ -10,7 +10,7 @@ batch_size = 4096
 N_voxel_init = 2097156 # 128**3
 N_voxel_final = 27000000 # 300**3
 upsamp_list = [2000,3000,4000,5500,7000]
-update_AlphaMask_list = [2000,4000]
+update_AlphaMask_list = [3000,4000]
 
 scene_box=[-4., -2., -4., 4., 6., 4.]
 near_far=[0., 12.]
@@ -20,18 +20,18 @@ vis_every = 10000
 
 render_test = 1
 
-n_lamb_sigma = [16,16,16]
-n_lamb_sh = [48,48,48]
+n_lamb_sigma = [8,8,8]
+n_lamb_sh = [8,8,8]
 model_name = TensorVMSplit
 
 
-shadingMode = MLP_Fea
+shadingMode = SH
 fea2denseAct = softplus
 
 view_pe = 2
 fea_pe = 2
 
-L1_weight_inital = 8e-5
+L1_weight_inital = 4e-5
 L1_weight_rest = 4e-5
 rm_weight_mask_thre = 1e-4
 

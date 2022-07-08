@@ -14,3 +14,5 @@ data/Scarf/transforms_test.json
 configs/Scar.txt
 configs/Easyship.txt
 configs/Car.txt
+.gitignore
+

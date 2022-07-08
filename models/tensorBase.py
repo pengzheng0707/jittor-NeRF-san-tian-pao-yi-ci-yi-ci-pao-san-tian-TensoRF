@@ -83,6 +83,26 @@ class MLPRender_Fea(nn.Module):
 
         return rgb
 
+class MLP_WEI(nn.Module):
+    def __init__(self, feape=6, featureC=128):
+        super(MLP_WEI, self).__init__()
+
+        self.in_mlpC = 2*feape*3 + 4
+        self.feape = feape
+
+        self.mlp = nn.Sequential(nn.Linear(self.in_mlpC, featureC), nn.ReLU(), nn.Linear(featureC, featureC), nn.ReLU(), nn.Linear(featureC,1),nn.ReLU())
+
+
+    def execute(self, pts, features):
+        indata = [pts,features]
+        if self.feape > 0:
+            indata += [positional_encoding(pts, self.feape)]
+
+        mlp_in = jt.concat(indata, dim=-1)
+        rgb = self.mlp(mlp_in)
+
+        return rgb
+
 class MLPRender_PE(nn.Module):
     def __init__(self,inChanel, viewpe=6, pospe=6, featureC=128):
         super(MLPRender_PE, self).__init__()
@@ -105,6 +125,28 @@ class MLPRender_PE(nn.Module):
         rgb = jt.sigmoid(rgb)
 
         return rgb
+
+class MLP_REF(nn.Module):
+    def __init__(self, viewpe=6, pospe=6, featureC=256):
+        super(MLP_REF, self).__init__()
+
+        self.in_mlpC = (3+2*viewpe*3)+ (3+2*pospe*3)  #
+        self.viewpe = viewpe
+        self.pospe = pospe
+
+        self.mlp = nn.Sequential(nn.Linear(self.in_mlpC, featureC), nn.ReLU(), nn.Linear(featureC, featureC), nn.ReLU(),nn.Linear(featureC, featureC), nn.ReLU(),nn.Linear(featureC, featureC), nn.ReLU(),nn.ReLU(),nn.Linear(featureC, featureC), nn.ReLU(),nn.Linear(featureC, featureC//2), nn.ReLU(), nn.Linear(featureC//2,4))
+
+
+    def execute(self, pts, viewdirs):
+        indata = [pts, viewdirs]
+        if self.pospe > 0:
+            indata += [positional_encoding(pts, self.pospe)]
+        if self.viewpe > 0:
+            indata += [positional_encoding(viewdirs, self.viewpe)]
+        mlp_in = jt.concat(indata, dim=-1)
+        ret = self.mlp(mlp_in)
+
+        return ret[...,0:3],ret[...,3:4]
 
 class MLPRender(nn.Module):
     def __init__(self,inChanel, viewpe=6, featureC=128):
@@ -170,6 +212,8 @@ class TensorBase(nn.Module):
             self.renderModule = MLPRender_PE(self.app_dim, view_pe, pos_pe, featureC)
         elif shadingMode == 'MLP_Fea':
             self.renderModule = MLPRender_Fea(self.app_dim, view_pe, fea_pe, featureC)
+            self.refModule = MLP_REF()
+            self.feature2wei = MLP_WEI()
         elif shadingMode == 'MLP':
             self.renderModule = MLPRender(self.app_dim, view_pe, featureC)
         elif shadingMode == 'SH':
@@ -285,10 +329,14 @@ class TensorBase(nn.Module):
         mask_outbbox = ((self.aabb[0] > rays_pts) | (rays_pts > self.aabb[1])).any(dim=-1)
         return rays_pts, interpx, jt.logical_not(mask_outbbox)
 
-    def sample_ray(self, rays_o, rays_d, dx, is_train=True, N_samples=-1):
-        N_samples = N_samples+1 if N_samples>0 else self.nSamples
+    def sample_ray(self, rays_o, rays_d, dx, is_train=True, N_samples=-1,is_ref=False):
+        N_samples = N_samples if N_samples>0 else self.nSamples
         stepsize = self.stepSize
+        if is_ref:
+            stepsize=stepsize*4
         near, far = self.near_far
+        if is_ref:
+            near = 0.
         vec = jt.where(rays_d==0, jt.full_like(rays_d, 1e-6), rays_d)
         rate_a = (self.aabb[1] - rays_o) / vec
         rate_b = (self.aabb[0] - rays_o) / vec
@@ -303,9 +351,9 @@ class TensorBase(nn.Module):
         # interpx = jt.linspace(0., 1., N_samples)
         # interpx = near + (far - near) * interpx
         # interpx = jt.broadcast(interpx, [rays_o.shape[0], N_samples])
-        means, covs = self.cast_rays(interpx, rays_o, rays_d, dx)
-        rays_pts=means+covs*jt.randn(covs.shape)
-        #rays_pts = rays_o[...,None,:] + rays_d[...,None,:] * interpx[...,None]
+        #means, covs = self.cast_rays(interpx, rays_o, rays_d, dx)
+        #rays_pts=means+covs*jt.randn(covs.shape)
+        rays_pts = rays_o[...,None,:] + rays_d[...,None,:] * interpx[...,None]
         mask_outbbox = ((self.aabb[0]>rays_pts) | (rays_pts>self.aabb[1])).any(dim=-1)
 
         return rays_pts, interpx, jt.logical_not(mask_outbbox)
@@ -490,8 +538,13 @@ class TensorBase(nn.Module):
     def execute(self, rays_chunk, white_bg=True, is_train=False, ndc_ray=False, N_samples=-1):
         N_importance=0
         # sample points
+        ori = rays_chunk[:, 0:3]
         viewdirs = rays_chunk[:, 3:6]
         dx=rays_chunk[:, 6:]
+        ref_viewdirs, z_change = self.refModule(rays_chunk[:, :3], viewdirs)
+        wei_ref=wei_ref.clamp(0,1)
+        ref_viewdirs = ref_viewdirs / jt.norm(ref_viewdirs, dim=-1, keepdim=True)
+
         if ndc_ray:
             xyz_sampled, z_vals, ray_valid = self.sample_ray_ndc(rays_chunk[:, :3], viewdirs, is_train=is_train,N_samples=N_samples)
             dists = jt.concat((z_vals[:, 1:] - z_vals[:, :-1], jt.zeros_like(z_vals[:, :1])), dim=-1)
@@ -500,8 +553,9 @@ class TensorBase(nn.Module):
             viewdirs = viewdirs / rays_norm
         else:
             xyz_sampled, z_vals, ray_valid = self.sample_ray(rays_chunk[:, :3], viewdirs, dx, is_train=is_train,N_samples=N_samples)
-            dists = (z_vals[:, 1:] - z_vals[:, :-1]) * jt.norm(jt.unsqueeze(viewdirs, dim=-2), dim=-1)
-            z_vals = .5 * (z_vals[...,1:] + z_vals[...,:-1])
+            dists = jt.concat((z_vals[:, 1:] - z_vals[:, :-1], jt.zeros_like(z_vals[:, :1])), dim=-1) #* jt.norm(jt.unsqueeze(viewdirs, dim=-2), dim=-1)
+            #z_vals = .5 * (z_vals[...,1:] + z_vals[...,:-1])
+
         
         if self.alphaMask is not None:
             alphas = self.alphaMask.sample_alpha(xyz_sampled[ray_valid])
@@ -509,9 +563,11 @@ class TensorBase(nn.Module):
             ray_invalid = jt.logical_not(ray_valid)
             ray_invalid[ray_valid] |= (jt.logical_not(alpha_mask))
             ray_valid = jt.logical_not(ray_invalid)
+        
 
 
         sigma = jt.zeros(xyz_sampled.shape[:-1])
+        wei= jt.zeros(xyz_sampled.shape[:-1])
         rgb = jt.zeros((*xyz_sampled.shape[:2], 3))
 
         if ray_valid.any():
@@ -519,21 +575,59 @@ class TensorBase(nn.Module):
             sigma_feature = self.compute_densityfeature(xyz_sampled[ray_valid])
 
             validsigma = self.feature2density(sigma_feature)
+            validwei = self.feature2wei(xyz_sampled, sigma_feature)
             sigma[ray_valid] = validsigma
-
+            wei[ray_valid] = validwei
 
         alpha, weight, bg_weight = raw2alpha(sigma, dists * self.distance_scale)
+
+        sigma_max=weight.arg_reduce("max",dim=-1,keepdims=False)[0]
+        args=jt.arange(sigma.shape[0])
+        z_ref_arg=jt.concat((args,sigma_max),dim=-1).reshape((2,-1))
+        z_ref=z_vals[z_ref_arg[0],z_ref_arg[1]]
+        new_ori=ori + (z_ref.reshape((z_ref.shape[0],1)) + z_change) * viewdirs
+
+        ref_xyz_sampled, ref_z_vals, ref_ray_valid = self.sample_ray(new_ori, ref_viewdirs, dx, is_train=is_train,N_samples=N_samples//2, is_ref=True)
+        ref_dists = jt.concat((ref_z_vals[:, 1:] - ref_z_vals[:, :-1], jt.zeros_like(ref_z_vals[:, :1])), dim=-1) #* jt.norm(jt.unsqueeze(viewdirs, dim=-2), dim=-1)
+
+        if self.alphaMask is not None:
+            ref_alphas = self.alphaMask.sample_alpha(ref_xyz_sampled[ref_ray_valid])
+            ref_alpha_mask = ref_alphas > 0
+            ref_ray_invalid = jt.logical_not(ref_ray_valid)
+            ref_ray_invalid[ref_ray_valid] |= (jt.logical_not(ref_alpha_mask))
+            ref_ray_valid = jt.logical_not(ref_ray_invalid)
+
+        ref_sigma = jt.zeros(ref_xyz_sampled.shape[:-1])
+        ref_rgb = jt.zeros((*ref_xyz_sampled.shape[:2], 3))
+
+        if ref_ray_valid.any():
+            ref_xyz_sampled = self.normalize_coord(ref_xyz_sampled)
+            ref_sigma_feature = self.compute_densityfeature(ref_xyz_sampled[ref_ray_valid])
+
+            ref_validsigma = self.feature2density(ref_sigma_feature)
+            ref_sigma[ref_ray_valid] = ref_validsigma
+
+        ref_alpha, ref_weight, ref_bg_weight = raw2alpha(ref_sigma, ref_dists * self.distance_scale)
 
 
         app_mask = weight > self.rayMarch_weight_thres
         viewdirs = viewdirs.view(-1, 1, 3).expand(xyz_sampled.shape)
+        ref_app_mask = ref_weight > self.rayMarch_weight_thres
+        ref_viewdirs = ref_viewdirs.view(-1, 1, 3).expand(ref_xyz_sampled.shape)
         if app_mask.any():
             app_features = self.compute_appfeature(xyz_sampled[app_mask])
             valid_rgbs = self.renderModule(xyz_sampled[app_mask], viewdirs[app_mask], app_features)
             rgb[app_mask] = valid_rgbs
+        if ref_app_mask.any():
+            ref_app_features = self.compute_appfeature(ref_xyz_sampled[ref_app_mask])
+            ref_valid_rgbs = self.renderModule(ref_xyz_sampled[ref_app_mask], ref_viewdirs[ref_app_mask], ref_app_features)
+            ref_rgb[ref_app_mask] = ref_valid_rgbs
 
         acc_map = jt.sum(weight, -1)
         rgb_map = jt.sum(weight[..., None] * rgb, -2)
+        wei_map = jt.sum(weight[..., None] * wei, -2)
+        ref_rgb_map = jt.sum(ref_weight[..., None] * ref_rgb, -2) * wei_map
+        rgb_map = rgb_map + ref_rgb_map
 
         if white_bg or (is_train and jt.rand((1,))<0.5):
             rgb_map = rgb_map + (1. - acc_map[..., None])
@@ -545,5 +639,5 @@ class TensorBase(nn.Module):
             depth_map = jt.sum(weight * z_vals, -1)
             depth_map = depth_map + (1. - acc_map) * rays_chunk[..., -1]
 
-        return rgb_map, depth_map # rgb, sigma, alpha, weight, bg_weight
+        return rgb_map, depth_map, ref_rgb_map # rgb, sigma, alpha, weight, bg_weight
 
