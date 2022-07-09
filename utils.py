@@ -54,7 +54,8 @@ def visualize_depth(depth, minmax=None, cmap=cv2.COLORMAP_JET):
 
 def N_to_reso(n_voxels, bbox):
     xyz_min, xyz_max = bbox
-    voxel_size = ((xyz_max - xyz_min).prod() / n_voxels).pow(1 / 3)
+    dim = len(xyz_min)
+    voxel_size = ((xyz_max - xyz_min).prod() / n_voxels).pow(1 / dim)
     return ((xyz_max - xyz_min) / voxel_size).int64().tolist()
 
 def cal_n_samples(reso, step_ratio=0.5):
