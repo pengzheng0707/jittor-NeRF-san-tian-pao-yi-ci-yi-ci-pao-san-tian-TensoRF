@@ -57,6 +57,7 @@ class BlenderDataset(Dataset):
         self.poses = []
         self.all_rays = []
         self.all_rgbs = []
+        self.all_accs = []
         self.all_masks = []
         self.all_depth = []
         self.downsample=1.0
@@ -78,8 +79,10 @@ class BlenderDataset(Dataset):
                 img = img.resize(self.img_wh, Image.LANCZOS)
             img = jt.float32(self.transform(img))  # (4, h, w)
             img = img.view(4, -1).permute(1, 0)  # (h*w, 4) RGBA
+            acc = img[:,3:4]
             img = img[:, :3] * img[:, -1:] + (1 - img[:, -1:])  # blend A to RGB
             self.all_rgbs += [img]
+            self.all_accs += [acc]
 
 
             rays_o, rays_d, dx = get_rays(self.directions, c2w)  # both (h*w, 3)
@@ -90,11 +93,13 @@ class BlenderDataset(Dataset):
         if not self.is_stack:
             self.all_rays = jt.concat(self.all_rays, 0)  # (len(self.meta['frames])*h*w, 3)
             self.all_rgbs = jt.concat(self.all_rgbs, 0)  # (len(self.meta['frames])*h*w, 3)
+            self.all_accs = jt.concat(self.all_accs, 0)
 
 #             self.all_depth = jt.concat(self.all_depth, 0)  # (len(self.meta['frames])*h*w, 3)
         else:
             self.all_rays = jt.stack(self.all_rays, 0)  # (len(self.meta['frames]),h*w, 3)
             self.all_rgbs = jt.stack(self.all_rgbs, 0).reshape(-1,*self.img_wh[::-1], 3)  # (len(self.meta['frames]),h,w,3)
+            self.all_accs = jt.stack(self.all_accs, 0).reshape(-1,*self.img_wh[::-1], 1)
             # self.all_masks = jt.stack(self.all_masks, 0).reshape(-1,*self.img_wh[::-1])  # (len(self.meta['frames]),h,w,3)
 
     def define_transforms(self):

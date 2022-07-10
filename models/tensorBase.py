@@ -422,7 +422,7 @@ class TensorBase(nn.Module):
         return new_aabb
 
     @jt.no_grad()
-    def filtering_rays(self, all_rays, all_rgbs, N_samples=256, chunk=10240*5, bbox_only=False):
+    def filtering_rays(self, all_rays, all_rgbs,all_accs, N_samples=256, chunk=10240*5, bbox_only=False):
         print('========> filtering rays ...')
         tt = time.time()
         a=all_rays.shape[:-1]
@@ -454,7 +454,7 @@ class TensorBase(nn.Module):
         mask_filtered = jt.concat(mask_filtered).view(all_rgbs.shape[:-1])
 
         print(f'Ray filtering done! takes {time.time()-tt} s. ray mask ratio: {jt.sum(mask_filtered) / N}')
-        return all_rays[mask_filtered], all_rgbs[mask_filtered]
+        return all_rays[mask_filtered], all_rgbs[mask_filtered], all_accs[mask_filtered]
 
 
     def feature2density(self, density_features):
@@ -545,5 +545,5 @@ class TensorBase(nn.Module):
             depth_map = jt.sum(weight * z_vals, -1)
             depth_map = depth_map + (1. - acc_map) * rays_chunk[..., -1]
 
-        return rgb_map, depth_map # rgb, sigma, alpha, weight, bg_weight
+        return rgb_map, depth_map, acc_map.view(-1,1) # rgb, sigma, alpha, weight, bg_weight
 

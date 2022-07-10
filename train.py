@@ -165,9 +165,9 @@ def reconstruction(args):
     jt.gc()
     PSNRs,PSNRs_test = [],[0]
 
-    allrays, allrgbs = train_dataset.all_rays, train_dataset.all_rgbs
+    allrays, allrgbs, allaccs = train_dataset.all_rays, train_dataset.all_rgbs, train_dataset.all_accs
     if not args.ndc_ray:
-        allrays, allrgbs = tensorf.filtering_rays(allrays, allrgbs, bbox_only=True)
+        allrays, allrgbs, allaccs = tensorf.filtering_rays(allrays, allrgbs,allaccs, bbox_only=True)
     trainingSampler = SimpleSampler(allrays.shape[0], args.batch_size)
 
     Ortho_reg_weight = args.Ortho_weight
@@ -185,17 +185,18 @@ def reconstruction(args):
 
         ray_idx = trainingSampler.nextids()
 
-        rays_train, rgb_train = allrays[ray_idx], allrgbs[ray_idx]
+        rays_train, rgb_train, acc_train = allrays[ray_idx], allrgbs[ray_idx], allaccs[ray_idx]
 
         #rgb_map, alphas_map, depth_map, weights, uncertainty
-        rgb_map, alphas_map, depth_map, weights, uncertainty = renderer(rays_train, tensorf, chunk=args.batch_size,
+        rgb_map, alphas_map, depth_map, weights, uncertainty, acc_map = renderer(rays_train, tensorf, chunk=args.batch_size,
                                 N_samples=nSamples, white_bg = white_bg, ndc_ray=ndc_ray, is_train=True)
 
         loss = jt.mean((rgb_map - rgb_train) ** 2)
+        acc_loss = jt.mean((acc_map - acc_train) ** 2)
 
 
         # loss
-        total_loss = loss
+        total_loss = loss + 0.001*acc_loss
         if Ortho_reg_weight > 0:
             loss_reg = tensorf.vector_comp_diffs()
             total_loss += Ortho_reg_weight*loss_reg
@@ -262,7 +263,7 @@ def reconstruction(args):
 
             if not args.ndc_ray and iteration == update_AlphaMask_list[1]:
                 # filter rays outside the bbox
-                allrays,allrgbs = tensorf.filtering_rays(allrays,allrgbs)
+                allrays,allrgbs,allaccs = tensorf.filtering_rays(allrays,allrgbs,allaccs)
                 trainingSampler = SimpleSampler(allrgbs.shape[0], args.batch_size)
             jt.clean_graph()
             jt.sync_all()
@@ -285,7 +286,7 @@ def reconstruction(args):
             jt.sync_all()
             jt.gc()
 
-        if iteration%500==0 or iteration in range(50):
+        if iteration%100==0 or iteration in range(50):
             jt.clean_graph()
             jt.sync_all()
             #jt.display_memory_info()
@@ -294,6 +295,8 @@ def reconstruction(args):
 
         #jt.sync_all()
         #jt.display_memory_info()
+        if iteration%5000==0:
+            tensorf.save(f'{logfolder}/{args.expname}.pkl')
 
     tensorf.save(f'{logfolder}/{args.expname}.pkl')
 
